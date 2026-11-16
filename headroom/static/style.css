@@ -132,6 +132,18 @@ h2 { font-size: 15px; margin: 0; font-weight: 600; }
 .dirs .size .muted { margin-left: 6px; }
 .dirs .bar { grid-column: 1 / -1; height: 4px; border-radius: 2px; background: var(--track); overflow: hidden; }
 .dirs .bar i { display: block; height: 100%; background: var(--series); border-radius: 2px; }
+.dirs .name.link { all: unset; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; color: var(--series); }
+.dirs .name.link:hover { text-decoration: underline; }
+.dirs .name.link:focus-visible { outline: 2px solid var(--series); outline-offset: 2px; border-radius: 2px; }
+.dirs .chev { margin-left: 4px; text-decoration: none; display: inline-block; }
+.dirs .extra .name { color: var(--muted); font-style: italic; }
+.dirs .extra .bar i { background: var(--muted); opacity: .5; }
+.crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 4px; margin: -4px 0 8px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+.crumbs button { all: unset; cursor: pointer; color: var(--series); padding: 2px 0; }
+.crumbs button:hover { text-decoration: underline; }
+.crumbs button:focus-visible { outline: 2px solid var(--series); outline-offset: 2px; border-radius: 2px; }
+.crumbs .sep { color: var(--muted); }
+.crumbs .here { font-weight: 600; overflow-wrap: anywhere; }
 .dirs .empty { color: var(--muted); font-size: 14px; display: block; border: 0; }
 
 .foot { text-align: center; margin-top: 8px; }

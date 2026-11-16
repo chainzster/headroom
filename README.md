@@ -11,8 +11,9 @@ changed over time, and which directories use the most space.
 - Keeps every reading in SQLite and plots usage over 24h, 7d, 30d or 1y.
 - Raises a warning at 80%, 90% and 95% by default. You can change the
   thresholds.
-- Lists the largest directories in your home directory, using a low-priority
-  `du` scan that runs every 6 hours.
+- Lists the largest folders in your home directory. Click a folder to see
+  what's inside it, down to 4 levels deep. One low-priority `du` scan every
+  6 hours collects all levels at once.
 - Runs without root or Docker. It needs only Flask and Waitress, and keeps all
   its files in your home directory.
 - Runs as a user-level systemd service. It can sit behind Ultra.cc's Nginx at a
@@ -63,7 +64,8 @@ service after changing it: `systemctl --user restart headroom`.
 | | `path` | `~` | Directory whose sub-directories are measured. |
 | | `scan_interval` | `21600` | Seconds between scans (at least 600). |
 | | `timeout` | `1800` | Seconds before a scan is abandoned. |
-| | `top_n` | `15` | Number of directories to show. |
+| | `depth` | `4` | How many levels below `path` you can drill into (1–8). |
+| | `top_n` | `15` | Folders shown per level. The rest are summed into one "smaller folders" row. |
 | | `exclude` | empty | Comma-separated `du --exclude` patterns. |
 | `storage` | `data_dir` | `~/.local/share/headroom` | Location of the SQLite database and log files. |
 | `auth` | `username` / `password_hash` | empty | Optional HTTP Basic auth. Generate the hash with `--hash-password`. |
@@ -89,7 +91,7 @@ tail -f ~/.local/share/headroom/headroom.log
 | `/` | Dashboard |
 | `/api/status` | Latest reading, warning level, 24h and 7d change |
 | `/api/history?range=24h\|7d\|30d\|1y` | Readings for the chart, reduced to at most about 400 points |
-| `/api/directories` | Results of the latest directory scan |
+| `/api/directories?path=files/tv` | Largest sub-folders of a folder from the latest scan. `path` is relative to the scan root; omit it for the top level. |
 | `/healthz` | Liveness check. Needs no login. |
 
 **Backups.** All history is in `~/.local/share/headroom/headroom.db`. To back it
@@ -108,8 +110,9 @@ up while Headroom is running:
   quota. `quota -s` rounds figures (for example `912G`), so the values shown
   are accurate to the unit `quota` prints.
 - **Directory scan.** Headroom runs
-  `nice -n 19 ionice -c 3 du -x -B1 --max-depth=1 ~` in a second background
-  thread. `-x` keeps the scan on your home filesystem, so rclone or FUSE mounts
+  `nice -n 19 ionice -c 3 du -0 -x -B1 --max-depth=4 ~` in a second
+  background thread, and stores every folder it reports. Drilling down only
+  reads the database, so it never starts a new scan. `-x` keeps the scan on your home filesystem, so rclone or FUSE mounts
   are skipped. The scan uses the lowest CPU and I/O priority, which matters on a
   shared server. Results are saved, so a restart doesn't trigger a new scan
   unless one is due.

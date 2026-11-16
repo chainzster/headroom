@@ -1,10 +1,24 @@
-from headroom.diskusage import parse_du_output
+from headroom.diskusage import build_command, parse_du_output
 
 
-def test_parse_du_output():
+def test_parse_du_output_newlines():
     out = "100\t/home/u/a\n300\t/home/u/b\n450\t/home/u\n"
-    total, dirs = parse_du_output(out, "/home/u/")
+    total, entries = parse_du_output(out, "/home/u/")
     assert total == 450
-    assert dirs[0] == ("b", 300)
-    assert ("a", 100) in dirs
-    assert dirs[-1] == ("(files directly in ~)", 50)
+    assert sorted(entries) == [("a", 100), ("b", 300)]
+
+
+def test_parse_du_output_nul_and_nested():
+    out = "\0".join([
+        "40\t/home/u/b/x", "60\t/home/u/b/odd\nname", "300\t/home/u/b",
+        "100\t/home/u/a", "450\t/home/u", "",
+    ])
+    total, entries = parse_du_output(out, "/home/u")
+    assert total == 450
+    assert dict(entries) == {"b/x": 40, "b/odd\nname": 60, "b": 300, "a": 100}
+
+
+def test_build_command_depth():
+    cmd = build_command("/home/u", [".cache"], depth=3)
+    assert "--max-depth=3" in cmd and "-0" in cmd
+    assert cmd[-2:] == ["--exclude=.cache", "/home/u"]

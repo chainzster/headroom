@@ -68,8 +68,9 @@ class Monitor:
         self.scanning = True
         started = time.time()
         try:
-            total, dirs = scan(self.cfg.scan_path, self.cfg.exclude, self.cfg.scan_timeout)
-            self.store.save_scan(self.cfg.scan_path, total, dirs, time.time() - started)
+            total, entries = scan(self.cfg.scan_path, self.cfg.exclude,
+                                  self.cfg.scan_timeout, self.cfg.scan_depth)
+            self.store.save_scan(self.cfg.scan_path, total, entries, time.time() - started)
             self.scan_error = None
             log.info("Directory scan finished in %.1fs", time.time() - started)
         except ScanError as exc:
@@ -83,7 +84,7 @@ class Monitor:
 
     def _scan_loop(self) -> None:
         # Skip the start-up scan if a recent one exists (e.g. after a restart).
-        last = self.store.latest_scan(1)
+        last = self.store.scan_info()
         wait = 60.0
         if last:
             wait = max(wait, last["ts"] + self.cfg.scan_interval - time.time())

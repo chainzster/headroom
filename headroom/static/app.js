@@ -208,30 +208,92 @@
       return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
     });
   }
+  // The folder being viewed, relative to the scan root ("" = top level).
+  // Kept in the URL hash so the browser's back button steps back up.
+  function dirPath() {
+    var m = /^#dir=(.*)$/.exec(location.hash);
+    if (!m) return "";
+    try { return decodeURIComponent(m[1]); } catch (e) { return ""; }
+  }
+  function openDir(path) {
+    if (path === dirPath()) return;
+    history.pushState(null, "", path ? "#dir=" + encodeURIComponent(path) :
+      location.pathname + location.search);
+    loadDirs();
+  }
+
+  function renderCrumbs(path) {
+    var box = $("dirs-crumbs");
+    if (!path) { box.hidden = true; box.innerHTML = ""; return; }
+    var parts = path.split("/"), html = '<button type="button" data-path="">~</button>';
+    parts.forEach(function (p, i) {
+      var sub = parts.slice(0, i + 1).join("/");
+      html += '<span class="sep" aria-hidden="true">/</span>' + (i === parts.length - 1 ?
+        '<span class="here" aria-current="location">' + esc(p) + "</span>" :
+        '<button type="button" data-path="' + esc(sub) + '">' + esc(p) + "</button>");
+    });
+    box.innerHTML = html; box.hidden = false;
+  }
+
+  function row(name, bytes, of, max, opts) {
+    var share = of ? bytes / of * 100 : 0;
+    var label = '<span class="name" title="' + esc(name) + '">' + esc(name) + "</span>";
+    if (opts.path !== undefined) {
+      label = '<button type="button" class="name link" data-path="' + esc(opts.path) +
+        '" title="Open ' + esc(name) + '">' + esc(name) + '<span class="chev" aria-hidden="true">›</span></button>';
+    }
+    return '<li class="' + (opts.cls || "") + '">' + label +
+      '<span class="size">' + fmtBytes(bytes) + '<span class="muted">' + share.toFixed(1) + "%</span></span>" +
+      '<span class="bar"><i style="width:' + (max ? bytes / max * 100 : 0).toFixed(1) + '%"></i></span></li>';
+  }
+
   function renderDirs(d) {
     var list = $("dirs"), meta = $("dirs-meta");
     if (!d.enabled) {
+      renderCrumbs("");
       list.innerHTML = '<li class="empty">Directory scanning is disabled in the config.</li>';
       meta.textContent = ""; return;
     }
-    var scan = d.scan;
-    meta.textContent = scan ? "Scanned " + ago(scan.ts) + " · " + fmtBytes(scan.total) + " total" +
-      (d.scanning ? " · rescanning…" : "") : (d.scanning ? "Scanning…" : "");
+    var scan = d.scan, lst = scan && scan.listing;
+    meta.textContent = scan ? "Scanned " + ago(scan.ts) + (d.scanning ? " · rescanning…" : "") :
+      (d.scanning ? "Scanning…" : "");
     if (d.error) meta.textContent += " · last scan failed: " + d.error;
-    if (!scan || !scan.directories.length) {
+    if (!lst) {
+      renderCrumbs("");
       list.innerHTML = '<li class="empty">' + (d.scanning ? "First scan in progress…" :
         "No scan yet. The first scan starts about a minute after Headroom starts.") + "</li>";
       return;
     }
-    var max = scan.directories[0].bytes || 1, html = "";
-    scan.directories.forEach(function (x) {
-      var share = scan.total ? (x.bytes / scan.total * 100) : 0;
-      html += '<li><span class="name" title="' + esc(x.name) + '">' + esc(x.name) + "</span>" +
-        '<span class="size">' + fmtBytes(x.bytes) + '<span class="muted">' + share.toFixed(1) + "%</span></span>" +
-        '<span class="bar"><i style="width:' + (x.bytes / max * 100).toFixed(1) + '%"></i></span></li>';
+    // The requested folder may be gone after a rescan; the server then sends the top level.
+    if (lst.path !== dirPath()) history.replaceState(null, "", lst.path ?
+      "#dir=" + encodeURIComponent(lst.path) : location.pathname + location.search);
+    renderCrumbs(lst.path);
+    meta.textContent = fmtBytes(lst.bytes) + " · " + meta.textContent;
+
+    var items = lst.directories.map(function (x) {
+      return { name: x.name, bytes: x.bytes, opts: x.expandable ? { path: x.path } : {} };
     });
-    list.innerHTML = html;
+    if (lst.loose > 0) items.push({ name: "(files directly in " + (lst.path ? "here" : "~") + ")",
+      bytes: lst.loose, opts: { cls: "extra" } });
+    if (lst.rest.count > 0) items.push({ name: lst.rest.count + " smaller folder" +
+      (lst.rest.count === 1 ? "" : "s"), bytes: lst.rest.bytes, opts: { cls: "extra" } });
+    // Folders come largest first from the server; the two summary rows stay at the bottom.
+    if (!items.length) {
+      list.innerHTML = '<li class="empty">This folder is empty.</li>'; return;
+    }
+    var max = Math.max.apply(null, items.map(function (x) { return x.bytes; })) || 1;
+    list.innerHTML = items.map(function (x) { return row(x.name, x.bytes, lst.bytes, max, x.opts); }).join("");
   }
+
+  function loadDirs() {
+    return getJSON("api/directories?path=" + encodeURIComponent(dirPath())).then(renderDirs);
+  }
+
+  document.addEventListener("click", function (ev) {
+    var b = ev.target.closest && ev.target.closest("#dirs [data-path], #dirs-crumbs [data-path]");
+    if (b) openDir(b.getAttribute("data-path"));
+  });
+  window.addEventListener("popstate", loadDirs);
 
   /* ---------- wiring ---------- */
 
@@ -239,7 +301,7 @@
     return Promise.all([
       getJSON("api/status").then(renderStatus),
       loadHistory(),
-      getJSON("api/directories").then(renderDirs)
+      loadDirs()
     ]).catch(function (e) {
       var a = $("alert");
       a.hidden = false; a.className = "alert lvl-critical";

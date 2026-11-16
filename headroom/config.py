@@ -40,6 +40,7 @@ class Config:
     scan_interval: int = 21600
     scan_timeout: int = 1800
     top_n: int = 15
+    scan_depth: int = 4
     exclude: List[str] = field(default_factory=list)
     # [storage]
     data_dir: str = "~/.local/share/headroom"
@@ -116,6 +117,7 @@ def load_config(path: Optional[str] = None) -> Config:
         scan_interval=get("directories", "scan_interval", d.scan_interval, int),
         scan_timeout=get("directories", "timeout", d.scan_timeout, int),
         top_n=get("directories", "top_n", d.top_n, int),
+        scan_depth=get("directories", "depth", d.scan_depth, int),
         exclude=[
             e.strip() for e in get("directories", "exclude", "").split(",") if e.strip()
         ],
@@ -145,5 +147,7 @@ def validate(cfg: Config) -> None:
         raise ConfigError("[directories] timeout must be at least 30 seconds")
     if not 1 <= cfg.top_n <= 100:
         raise ConfigError("[directories] top_n must be between 1 and 100")
+    if not 1 <= cfg.scan_depth <= 8:
+        raise ConfigError("[directories] depth must be between 1 and 8")
     if bool(cfg.username) != bool(cfg.password_hash):
         raise ConfigError("[auth] set both username and password_hash, or neither")

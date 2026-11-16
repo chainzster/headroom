@@ -116,8 +116,16 @@ def create_app(cfg: Config, store: Store, monitor: Monitor) -> Flask:
 
     @app.route("/api/directories")
     def directories():
+        path = request.args.get("path", "").strip("/")
+        info = store.scan_info()
+        listing = store.dir_listing(path, cfg.top_n) if info else None
+        if info and listing is None and path:
+            # The folder vanished in a newer scan: fall back to the top level.
+            listing = store.dir_listing("", cfg.top_n)
+        if info:
+            info["listing"] = listing
         return jsonify({
-            "scan": store.latest_scan(cfg.top_n),
+            "scan": info,
             "enabled": cfg.scan_enabled,
             "scanning": monitor.scanning,
             "error": monitor.scan_error,

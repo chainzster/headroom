@@ -75,13 +75,56 @@ def test_history_downsampling_and_prune(env):
 
 def test_directory_scan(env):
     cfg, store, mon, _ = env
-    os.makedirs(os.path.join(cfg.scan_path, "big"))
-    with open(os.path.join(cfg.scan_path, "big", "f"), "wb") as fh:
+    os.makedirs(os.path.join(cfg.scan_path, "big", "inner"))
+    with open(os.path.join(cfg.scan_path, "big", "inner", "f"), "wb") as fh:
         fh.write(b"x" * 200000)
     mon.scan_once()
     assert mon.scan_error is None
-    scan = store.latest_scan(5)
-    assert scan["directories"][0]["name"] == "big"
+    top = store.dir_listing("", 5)
+    assert top["directories"][0]["name"] == "big"
+    assert top["directories"][0]["expandable"] is True
+    inner = store.dir_listing("big", 5)["directories"][0]
+    assert inner["path"] == "big/inner"
+
+
+def test_directory_drill_down_api(env):
+    cfg, store, mon, _ = env
+    cfg.top_n = 2
+    store.save_scan(cfg.scan_path, 1000, [
+        ("files", 900), ("files/a", 500), ("files/b", 300), ("files/c", 50),
+        ("files/a/deep", 400), ("misc", 60),
+    ], 1.0)
+    client = create_app(cfg, store, mon).test_client()
+
+    top = client.get("/headroom/api/directories").get_json()["scan"]["listing"]
+    assert [d["name"] for d in top["directories"]] == ["files", "misc"]
+    assert top["loose"] == 40 and top["rest"] == {"count": 0, "bytes": 0}
+
+    files = client.get("/headroom/api/directories?path=files").get_json()["scan"]["listing"]
+    assert files["bytes"] == 900
+    assert [d["path"] for d in files["directories"]] == ["files/a", "files/b"]
+    assert files["directories"][0]["expandable"] is True
+    assert files["directories"][1]["expandable"] is False
+    assert files["rest"] == {"count": 1, "bytes": 50}
+    assert files["loose"] == 50
+
+    # Unknown path falls back to the top level instead of an empty list.
+    gone = client.get("/headroom/api/directories?path=nope").get_json()["scan"]["listing"]
+    assert gone["path"] == ""
+
+
+def test_legacy_scan_table_is_migrated(tmp_path):
+    import sqlite3
+    db = tmp_path / "h.db"
+    con = sqlite3.connect(str(db))
+    con.executescript(
+        "CREATE TABLE dir_scan (id INTEGER PRIMARY KEY, ts INTEGER, root TEXT, "
+        "total INTEGER, duration REAL);"
+        "INSERT INTO dir_scan VALUES (1, 1, '/h', 5, 0.1);"
+        "CREATE TABLE dir_sizes (name TEXT, bytes INTEGER);")
+    con.commit(); con.close()
+    store = Store(db)
+    assert store.scan_info() is None  # forces a new multi-level scan soon
 
 
 def test_auth(env):
