@@ -2,7 +2,7 @@
 
 These steps install Headroom entirely inside your home directory. They need no
 root access, no `sudo` and no Docker. For Ultra.cc's general rules on custom
-applications, see [ultracc-generic-software-installation.md](ultracc-generic-software-installation.md).
+applications, see their [Generic Software Installation](https://docs.ultra.cc/unofficial-application-installers/generic-software-installation) guide.
 
 > Headroom is a custom third-party application. Ultra.cc staff do not support it.
 
