@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Headroom</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='1' y='1' width='14' height='14' rx='3' fill='%232a78d6'/%3E%3Crect x='4' y='8' width='8' height='4' rx='1' fill='white'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v={{ version }}">
+</head>
+<body>
+  <main class="wrap">
+    <header class="top">
+      <h1>Headroom</h1>
+      <span id="level" class="pill pill-unknown" role="status">
+        <span class="pill-icon" aria-hidden="true">•</span><span class="pill-text">Loading…</span>
+      </span>
+    </header>
+
+    <div id="alert" class="alert" hidden></div>
+
+    <section class="card hero" aria-labelledby="hero-label">
+      <div class="hero-main">
+        <div>
+          <div id="hero-label" class="label">Remaining</div>
+          <div class="hero-free"><span id="free">–</span></div>
+        </div>
+        <div class="hero-pct">
+          <div class="label">Used</div>
+          <div class="pct"><span id="percent">–</span></div>
+        </div>
+      </div>
+      <div class="meter" aria-hidden="true">
+        <div id="meter-fill" class="meter-fill"></div>
+        <div id="meter-ticks"></div>
+      </div>
+      <div class="meter-caption"><span id="used-of">–</span></div>
+      <dl class="stats">
+        <div><dt>Used</dt><dd id="used">–</dd></div>
+        <div><dt>Allocated</dt><dd id="total">–</dd></div>
+        <div><dt>Change 24h</dt><dd id="chg24">–</dd></div>
+        <div><dt>Change 7d</dt><dd id="chg7">–</dd></div>
+      </dl>
+    </section>
+
+    <section class="card" aria-labelledby="hist-title">
+      <div class="card-head">
+        <h2 id="hist-title">Used storage over time</h2>
+        <div class="seg" role="group" aria-label="Time range">
+          <button type="button" data-range="24h">24h</button>
+          <button type="button" data-range="7d" class="active">7d</button>
+          <button type="button" data-range="30d">30d</button>
+          <button type="button" data-range="1y">1y</button>
+        </div>
+      </div>
+      <div class="legend" aria-hidden="true">
+        <span><i class="key key-used"></i>Used</span>
+        <span><i class="key key-total"></i>Allocated</span>
+      </div>
+      <div id="chart" class="chart"></div>
+    </section>
+
+    <section class="card" aria-labelledby="dirs-title">
+      <div class="card-head">
+        <h2 id="dirs-title">Largest directories</h2>
+        <span id="dirs-meta" class="muted small"></span>
+      </div>
+      <ol id="dirs" class="dirs"></ol>
+    </section>
+
+    <footer class="foot muted small">
+      <span id="updated">–</span> · Headroom {{ version }}
+    </footer>
+  </main>
+  <script src="{{ url_for('static', filename='app.js') }}?v={{ version }}"></script>
+</body>
+</html>
