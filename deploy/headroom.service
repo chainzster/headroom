@@ -1,0 +1,24 @@
+# User-level systemd unit for Headroom.
+# Install to ~/.config/systemd/user/headroom.service, then:
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now headroom.service
+# %h expands to your home directory.
+
+[Unit]
+Description=Headroom storage quota monitor
+After=network-online.target
+
+[Service]
+Type=exec
+WorkingDirectory=%h/headroom
+ExecStart=%h/headroom/.venv/bin/python -m headroom --config %h/.config/headroom/config.ini
+Restart=on-failure
+RestartSec=15
+# Be a good neighbour on a shared server.
+Nice=10
+Environment=PYTHONUNBUFFERED=1
+StandardOutput=append:%h/.local/share/headroom/service.log
+StandardError=append:%h/.local/share/headroom/service.log
+
+[Install]
+WantedBy=default.target
