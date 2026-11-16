@@ -21,7 +21,7 @@ quota -s            # should print your space used and quota
 
 If `python3` is missing or older than 3.8, install a newer Python with
 Ultra.cc's Python installation guide (pyenv), then use that Python in step 5
-(`PYTHON=~/.pyenv/shims/python3 ./install.sh`).
+(`PYTHON=~/.pyenv/shims/python3 bash install.sh`).
 
 `quota -s` is the source of truth for your allocation. Do **not** use `df`:
 it reports the whole shared server disk, not your plan.
@@ -46,11 +46,18 @@ git clone https://github.com/chainzster/headroom.git
 cd headroom
 ```
 
+The repository is public, so no GitHub login or key is needed. Prefer
+`git clone` over copying the files by SFTP: it makes updating a one-line
+`git pull`.
+
 ## 5. Run the installer
 
 ```bash
-./install.sh 12345 /headroom
+bash install.sh 12345 /headroom
 ```
+
+Run it with `bash` as shown. `./install.sh` fails with "Permission denied" if
+the executable bit was lost in transfer or your home is mounted `noexec`.
 
 The installer:
 
@@ -61,7 +68,7 @@ The installer:
 4. runs `python -m headroom --check` to read the quota once;
 5. enables and starts the service.
 
-You can re-run it at any time, for example after `git pull`.
+It is safe to re-run at any time.
 
 ### Manual installation (alternative)
 
@@ -92,7 +99,9 @@ To require a login:
 ~/headroom/.venv/bin/python -m headroom --hash-password
 ```
 
-Paste the output into `~/.config/headroom/config.ini`:
+Paste the **entire** output line, including the `scrypt:32768:8:1$` prefix,
+into `~/.config/headroom/config.ini`. Don't add quotes. The prefix tells
+Headroom how the hash was made; without it every login fails.
 
 ```ini
 [auth]
@@ -110,7 +119,11 @@ sed -e 's|12345|YOUR_PORT|' ~/headroom/deploy/headroom.nginx.conf \
 app-nginx restart
 ```
 
-Open `https://<username>.<hostname>.usbx.me/headroom/`.
+Open `https://<username>.<hostname>.usbx.me/headroom/`. Keep the trailing
+slash: the Nginx `location` only matches `/headroom/`.
+
+You only need to do this once. It doesn't need repeating after updates or
+config changes, unless you change the port or `base_url`.
 
 The `location` path in the Nginx file must match `base_url` in
 `config.ini`. To use a different path, such as `/storage`, change both.
@@ -140,14 +153,36 @@ tail -f ~/.local/share/headroom/service.log    # startup errors / crashes
 
 ## Updating
 
+You never need to repeat the whole install.
+
+**Config changes** (thresholds, password, etc.): edit
+`~/.config/headroom/config.ini`, then restart:
+
 ```bash
-cd ~/headroom
-git pull
-./install.sh
+systemctl --user restart headroom
 ```
+
+**New code:** pull and restart:
+
+```bash
+cd ~/headroom && git pull && systemctl --user restart headroom
+```
+
+If `requirements.txt` changed, run `bash install.sh` instead of the restart.
+It updates the virtualenv and restarts the service, and never overwrites your
+config.
 
 Your config and history are stored outside the code directory, so updates keep
 them.
+
+If you first copied the files by SFTP and `git pull` complains about local
+changes, make the copy match GitHub exactly (this keeps your config, history
+and `.venv`, but discards any edits made to the code on the server):
+
+```bash
+git config core.fileMode false
+git fetch && git reset --hard origin/main
+```
 
 ## Uninstalling
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Headroom installer for Ultra.cc (no root, no Docker).
 #
-# Usage:  ./install.sh [PORT] [BASE_URL]
+# Usage:  bash install.sh [PORT] [BASE_URL]
 #   PORT      a port assigned to your account (only used when creating config.ini)
 #   BASE_URL  URL path for the Nginx proxy, default /headroom
 #

@@ -25,12 +25,12 @@ changed over time, and which directories use the most space.
 ```bash
 cd ~ && git clone https://github.com/chainzster/headroom.git && cd headroom
 app-ports free                 # pick a port from YOUR assigned range (or check the UCP)
-./install.sh 12345 /headroom   # port, base URL
+bash install.sh 12345 /headroom   # port, base URL
 # install.sh finishes by printing the exact command to install the Nginx proxy file
 app-nginx restart
 ```
 
-Then open `https://<username>.<hostname>.usbx.me/headroom/`.
+Then open `https://<username>.<hostname>.usbx.me/headroom/` (keep the trailing slash).
 
 For the full instructions, including manual install, password setup, updating
 and uninstalling, see **[docs/INSTALL-ULTRACC.md](docs/INSTALL-ULTRACC.md)**.
@@ -127,6 +127,8 @@ up while Headroom is running:
 | "Could not read quota: quota command not found" | Run `which quota`. If it's in an unusual place, set `quota_command` to the full path. |
 | "No quota is set for this user" | `quota -s` prints `none`. Contact Ultra.cc support. |
 | Several filesystems listed, wrong one shown | Set `[monitor] filesystem` to the device name from `quota -s`. |
+| `./install.sh: Permission denied` | The executable bit was lost (e.g. the files were copied over SFTP), or your home is mounted `noexec`. Run `bash install.sh` instead. |
+| Login always fails | `password_hash` must be the whole line printed by `--hash-password`, including the `scrypt:32768:8:1$` prefix, with no quotes. |
 | 502 Bad Gateway through Nginx | Check that the service is running and the port in `config.ini` matches the Nginx file. Then run `app-nginx restart`. |
 | Page loads without styling, or API 404s | `base_url` doesn't match the Nginx `location`, or `proxy_pass` ends in `/`. |
 | Directory scan times out | Increase `[directories] timeout`, or exclude large trees with `exclude`. |
