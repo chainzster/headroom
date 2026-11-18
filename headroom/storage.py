@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import threading
 import time
@@ -26,13 +27,21 @@ CREATE TABLE IF NOT EXISTS dir_scan (
 );
 -- Every directory from the latest scan. path is relative to the scan root
 -- ("" is the root itself); nchild counts the sub-directories recorded for it.
+-- freeable is what deleting the folder would give back (hard links counted).
 CREATE TABLE IF NOT EXISTS dir_tree (
-    path   TEXT PRIMARY KEY,
-    parent TEXT,
-    bytes  INTEGER NOT NULL,
-    nchild INTEGER NOT NULL
+    path     TEXT PRIMARY KEY,
+    parent   TEXT,
+    bytes    INTEGER NOT NULL,
+    nchild   INTEGER NOT NULL,
+    freeable INTEGER
 );
 CREATE INDEX IF NOT EXISTS dir_tree_parent ON dir_tree(parent, bytes DESC);
+
+-- The "what could be freed" report from the latest scan, as JSON.
+CREATE TABLE IF NOT EXISTS reclaim (
+    id   INTEGER PRIMARY KEY CHECK (id = 1),
+    json TEXT NOT NULL
+);
 """
 
 # Before 1.1 only the top level was stored, in dir_sizes. Drop it and the old
@@ -55,6 +64,11 @@ class Store:
             db.executescript(SCHEMA)
             if legacy:
                 db.executescript(MIGRATE)
+            cols = [r[1] for r in db.execute("PRAGMA table_info(dir_tree)")]
+            if "freeable" not in cols:
+                # 1.1 scans have no freeable figures: rescan soon after upgrading.
+                db.execute("ALTER TABLE dir_tree ADD COLUMN freeable INTEGER")
+                db.execute("DELETE FROM dir_scan")
 
     @contextmanager
     def _connect(self):
@@ -114,21 +128,33 @@ class Store:
 
     # -- directory scans ----------------------------------------------------
 
-    def save_scan(self, root: str, total: int, entries: List[Tuple[str, int]],
-                  duration: float) -> None:
-        """Replace the stored scan. `entries` are (relative path, bytes)."""
-        rows = {"": [None, total, 0]}
-        for path, size in entries:
-            rows[path] = [path.rpartition("/")[0], size, 0]
+    def save_scan(self, root: str, total: int, entries: List[Tuple],
+                  duration: float, freeable: Optional[int] = None,
+                  report: Optional[Dict] = None) -> None:
+        """Replace the stored scan.
+
+        `entries` are (relative path, bytes) or (relative path, bytes,
+        freeable bytes). `report` is the reclaim report shown on the page.
+        """
+        rows = {"": [None, total, 0, freeable]}
+        for entry in entries:
+            path, size = entry[0], entry[1]
+            rows[path] = [path.rpartition("/")[0], size, 0,
+                          entry[2] if len(entry) > 2 else None]
         for path, row in rows.items():
             if row[0] is not None and row[0] in rows:
                 rows[row[0]][2] += 1
         with self._lock, self._connect() as db:
             db.execute("DELETE FROM dir_tree")
             db.executemany(
-                "INSERT INTO dir_tree (path, parent, bytes, nchild) VALUES (?, ?, ?, ?)",
-                ((p, r[0], r[1], r[2]) for p, r in rows.items()),
+                "INSERT INTO dir_tree (path, parent, bytes, nchild, freeable) "
+                "VALUES (?, ?, ?, ?, ?)",
+                ((p, r[0], r[1], r[2], r[3]) for p, r in rows.items()),
             )
+            db.execute("DELETE FROM reclaim")
+            if report is not None:
+                db.execute("INSERT INTO reclaim (id, json) VALUES (1, ?)",
+                           (json.dumps(report),))
             db.execute(
                 "INSERT OR REPLACE INTO dir_scan (id, ts, root, total, duration) "
                 "VALUES (1, ?, ?, ?, ?)",
@@ -143,6 +169,11 @@ class Store:
         return {"ts": head[0], "root": head[1], "total": head[2],
                 "duration": round(head[3], 1)}
 
+    def reclaim_report(self) -> Optional[Dict]:
+        with self._connect() as db:
+            row = db.execute("SELECT json FROM reclaim").fetchone()
+        return json.loads(row[0]) if row else None
+
     def dir_listing(self, path: str, limit: int) -> Optional[Dict]:
         """The largest sub-directories of `path` (relative to the scan root).
 
@@ -152,12 +183,12 @@ class Store:
         `rest`.
         """
         with self._connect() as db:
-            node = db.execute("SELECT bytes, nchild FROM dir_tree WHERE path = ?",
+            node = db.execute("SELECT bytes, nchild, freeable FROM dir_tree WHERE path = ?",
                               (path,)).fetchone()
             if not node:
                 return None
             rows = db.execute(
-                "SELECT path, bytes, nchild FROM dir_tree WHERE parent = ? "
+                "SELECT path, bytes, nchild, freeable FROM dir_tree WHERE parent = ? "
                 "ORDER BY bytes DESC LIMIT ?", (path, limit),
             ).fetchall()
             count, child_bytes = db.execute(
@@ -168,9 +199,11 @@ class Store:
         return {
             "path": path,
             "bytes": node[0],
+            "freeable": node[2],
             "directories": [
-                {"name": p.rpartition("/")[2], "path": p, "bytes": b, "expandable": n > 0}
-                for p, b, n in rows
+                {"name": p.rpartition("/")[2], "path": p, "bytes": b,
+                 "freeable": f, "expandable": n > 0}
+                for p, b, n, f in rows
             ],
             "loose": max(node[0] - child_bytes, 0),
             "rest": {"count": count - len(rows), "bytes": child_bytes - shown},

@@ -12,8 +12,14 @@ changed over time, and which directories use the most space.
 - Raises a warning at 80%, 90% and 95% by default. You can change the
   thresholds.
 - Lists the largest folders in your home directory. Click a folder to see
-  what's inside it, down to 4 levels deep. One low-priority `du` scan every
+  what's inside it, down to 4 levels deep. One low-priority scan every
   6 hours collects all levels at once.
+- Shows how much deleting each folder would really free. Files that Sonarr
+  and Radarr hardlink into your library only free space once every copy is
+  gone, so a 500 GiB downloads folder can free almost nothing.
+- Reports space you could free: leftover downloads that no Transmission
+  torrent uses, cache, log and trash folders, the largest files, and likely
+  duplicates. It only reports. It never deletes anything.
 - Runs without root or Docker. It needs only Flask and Waitress, and keeps all
   its files in your home directory.
 - Runs as a user-level systemd service. It can sit behind Ultra.cc's Nginx at a
@@ -40,7 +46,6 @@ and uninstalling, see **[docs/INSTALL-ULTRACC.md](docs/INSTALL-ULTRACC.md)**.
 
 - Python 3.8 or newer
 - The `quota` command (installed on Ultra.cc)
-- `du` from GNU coreutils, for the directory report
 - An HTTP port from your Ultra.cc port range
 
 ## Configuration
@@ -67,6 +72,14 @@ service after changing it: `systemctl --user restart headroom`.
 | | `depth` | `4` | How many levels below `path` you can drill into (1–8). |
 | | `top_n` | `15` | Folders shown per level. The rest are summed into one "smaller folders" row. |
 | | `exclude` | empty | Comma-separated `du --exclude` patterns. |
+| `reclaim` | `largest_files` | `25` | How many of the largest files to list (0–200). |
+| | `duplicate_min_size_mb` | `100` | Minimum size for the duplicate check. `0` turns it off. |
+| | `junk_defaults` | `true` | Report the built-in cache, log and trash folders. |
+| | `junk` | empty | Extra folders to report, as comma-separated patterns relative to `[directories] path`. |
+| `transmission` | `enabled` | `false` | Look for leftover downloads. |
+| | `url` | empty | RPC URL, e.g. `http://127.0.0.1:12346/transmission/rpc`. Empty reads the port from `~/.config/transmission-daemon/settings.json`. |
+| | `username` / `password` | empty | Transmission web UI login. |
+| | `download_dirs` | empty | Extra comma-separated folders to check for leftovers. |
 | `storage` | `data_dir` | `~/.local/share/headroom` | Location of the SQLite database and log files. |
 | `auth` | `username` / `password_hash` | empty | Optional HTTP Basic auth. Generate the hash with `--hash-password`. |
 
@@ -91,7 +104,9 @@ tail -f ~/.local/share/headroom/headroom.log
 | `/` | Dashboard |
 | `/api/status` | Latest reading, warning level, 24h and 7d change |
 | `/api/history?range=24h\|7d\|30d\|1y` | Readings for the chart, reduced to at most about 400 points |
-| `/api/directories?path=files/tv` | Largest sub-folders of a folder from the latest scan. `path` is relative to the scan root; omit it for the top level. |
+| `/api/directories?path=files/tv` | Largest sub-folders of a folder from the latest scan, with `freeable` bytes. `path` is relative to the scan root; omit it for the top level. |
+| `/api/reclaim` | The "Space you could free" report from the latest scan |
+| `/api/rescan` | `POST` with header `X-Headroom: 1` to start a scan now |
 | `/healthz` | Liveness check. Needs no login. |
 
 **Backups.** All history is in `~/.local/share/headroom/headroom.db`. To back it
@@ -109,13 +124,23 @@ up while Headroom is running:
   wrap onto their own line, and the `*` marker that appears when you are over
   quota. `quota -s` rounds figures (for example `912G`), so the values shown
   are accurate to the unit `quota` prints.
-- **Directory scan.** Headroom runs
-  `nice -n 19 ionice -c 3 du -0 -x -B1 --max-depth=4 ~` in a second
-  background thread, and stores every folder it reports. Drilling down only
-  reads the database, so it never starts a new scan. `-x` keeps the scan on your home filesystem, so rclone or FUSE mounts
-  are skipped. The scan uses the lowest CPU and I/O priority, which matters on a
-  shared server. Results are saved, so a restart doesn't trigger a new scan
-  unless one is due.
+- **Directory scan.** A second background thread starts
+  `nice -n 19 ionice -c 3 python headroom/scanner.py`, which walks your home
+  folder once. Like `du -x`, it stays on your home filesystem (rclone and FUSE
+  mounts are skipped) and doesn't follow symlinks. It uses the lowest CPU and
+  I/O priority, which matters on a shared server. Every folder down to `depth`
+  is saved, so drilling down only reads the database. Results are kept, so a
+  restart doesn't trigger a new scan unless one is due.
+- **Hard links.** The scan records every file with more than one link. A file
+  frees space only once all its links are deleted, so its size counts towards
+  "frees" only for folders that contain every link. Folder sizes still count
+  each file once, like `du`, so they add up.
+- **Leftover downloads.** Before each scan, Headroom reads Transmission's
+  torrent list over RPC (`session-get` and `torrent-get` only). An entry in a
+  download folder is reported if no torrent's data is at that path (with or
+  without `.part`) and it is not itself another download folder. Entries
+  changed after the list was read are skipped, so a torrent added mid-scan
+  isn't reported.
 - **Base URL.** A small WSGI middleware moves the `base_url` prefix into
   `SCRIPT_NAME`. The page uses relative URLs. This means the same instance works
   both behind Nginx at `/headroom/` and directly at `http://host:port/`.
@@ -135,6 +160,8 @@ up while Headroom is running:
 | 502 Bad Gateway through Nginx | Check that the service is running and the port in `config.ini` matches the Nginx file. Then run `app-nginx restart`. |
 | Page loads without styling, or API 404s | `base_url` doesn't match the Nginx `location`, or `proxy_pass` ends in `/`. |
 | Directory scan times out | Increase `[directories] timeout`, or exclude large trees with `exclude`. |
+| "Could not read Transmission" | Check `[transmission] url`: the port is `rpc-port` in `~/.config/transmission-daemon/settings.json`. Use the same username and password as the web UI. |
+| Leftovers list is empty but Transmission is enabled | Its download folders must be inside `[directories] path`. Folders outside it are listed as not checked. |
 
 ## Development
 
@@ -153,7 +180,9 @@ headroom/            application package
   app.py             Flask routes, base-URL middleware, auth
   config.py          INI config loading and validation
   quota.py           runs and parses `quota -s`
-  diskusage.py       low-priority `du` scan
+  diskusage.py       starts the low-priority scan
+  scanner.py         the scan itself: folder sizes, hard links, report data
+  transmission.py    reads Transmission's torrent list, finds leftovers
   monitor.py         background polling and scan threads
   storage.py         SQLite persistence
   templates/, static/  the dashboard

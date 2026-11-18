@@ -235,6 +235,13 @@
     box.innerHTML = html; box.hidden = false;
   }
 
+  // "frees X" when deleting would give back noticeably less than the size.
+  function freesNote(bytes, freeable) {
+    if (freeable === null || freeable === undefined || freeable >= bytes * 0.98) return "";
+    return '<span class="frees' + (freeable < bytes * 0.02 ? " none" : "") + '">frees ' +
+      fmtBytes(freeable) + "</span>";
+  }
+
   function row(name, bytes, of, max, opts) {
     var share = of ? bytes / of * 100 : 0;
     var label = '<span class="name" title="' + esc(name) + '">' + esc(name) + "</span>";
@@ -243,7 +250,8 @@
         '" title="Open ' + esc(name) + '">' + esc(name) + '<span class="chev" aria-hidden="true">›</span></button>';
     }
     return '<li class="' + (opts.cls || "") + '">' + label +
-      '<span class="size">' + fmtBytes(bytes) + '<span class="muted">' + share.toFixed(1) + "%</span></span>" +
+      '<span class="size">' + fmtBytes(bytes) + '<span class="muted">' + share.toFixed(1) + "%</span>" +
+      freesNote(bytes, opts.freeable) + "</span>" +
       '<span class="bar"><i style="width:' + (max ? bytes / max * 100 : 0).toFixed(1) + '%"></i></span></li>';
   }
 
@@ -268,10 +276,14 @@
     if (lst.path !== dirPath()) history.replaceState(null, "", lst.path ?
       "#dir=" + encodeURIComponent(lst.path) : location.pathname + location.search);
     renderCrumbs(lst.path);
-    meta.textContent = fmtBytes(lst.bytes) + " · " + meta.textContent;
+    meta.textContent = fmtBytes(lst.bytes) + (lst.freeable !== null && lst.freeable !== undefined &&
+      lst.freeable < lst.bytes * 0.98 ? " (frees " + fmtBytes(lst.freeable) + ")" : "") +
+      " · " + meta.textContent;
 
     var items = lst.directories.map(function (x) {
-      return { name: x.name, bytes: x.bytes, opts: x.expandable ? { path: x.path } : {} };
+      var o = x.expandable ? { path: x.path } : {};
+      o.freeable = x.freeable;
+      return { name: x.name, bytes: x.bytes, opts: o };
     });
     if (lst.loose > 0) items.push({ name: "(files directly in " + (lst.path ? "here" : "~") + ")",
       bytes: lst.loose, opts: { cls: "extra" } });
@@ -295,13 +307,159 @@
   });
   window.addEventListener("popstate", loadDirs);
 
+
+  /* ---------- space you could free ---------- */
+
+  var SHOW = 8;
+  var expanded = {};  // section id -> showing every item
+
+  function ageText(ts) {
+    var days = (Date.now() / 1000 - ts) / 86400;
+    if (days < 1) return "changed today";
+    if (days < 60) return "changed " + Math.round(days) + " days ago";
+    if (days < 730) return "changed " + Math.round(days / 30.4) + " months ago";
+    return "changed " + Math.round(days / 365) + " years ago";
+  }
+  // Paths are relative to the scan root; show "~/x" when that is the home folder.
+  function showPath(root, p) { return root === "~" ? "~/" + p : p; }
+
+  function freesLine(it) {
+    if (it.freeable >= it.bytes * 0.98) return "";
+    if (it.freeable < it.bytes * 0.02) return '<span class="frees none">hard-linked elsewhere: frees nothing</span>';
+    return '<span class="frees">frees ' + fmtBytes(it.freeable) + " (rest is hard-linked elsewhere)</span>";
+  }
+
+  function item(title, size, subs, cls) {
+    return '<li class="' + (cls || "") + '"><span class="name" title="' + esc(title) + '">' + esc(title) +
+      '</span><span class="size">' + size + "</span>" +
+      (subs.length ? '<span class="sub">' + subs.filter(Boolean).join('<span class="dot-sep" aria-hidden="true"> · </span>') + "</span>" : "") +
+      "</li>";
+  }
+
+  function section(id, title, total, intro, rows, empty, open) {
+    var all = expanded[id], shown = all ? rows : rows.slice(0, SHOW);
+    var body = intro ? '<p class="muted small">' + intro + "</p>" : "";
+    body += rows.length ? '<ol class="rlist">' + shown.join("") + "</ol>" :
+      '<p class="muted small empty">' + empty + "</p>";
+    if (rows.length > SHOW) {
+      body += '<button type="button" class="more" data-more="' + id + '">' +
+        (all ? "Show fewer" : "Show all " + rows.length) + "</button>";
+    }
+    return '<details class="rsec" data-sec="' + id + '"' + (open ? " open" : "") + "><summary><span>" + title +
+      "</span>" + (total ? '<span class="rtotal">' + total + "</span>" : "") + "</summary>" + body + "</details>";
+  }
+
+  function sum(list, key) { return list.reduce(function (a, x) { return a + x[key]; }, 0); }
+
+  function renderReclaim(d) {
+    var box = $("reclaim"), meta = $("reclaim-meta"), btn = $("rescan");
+    btn.disabled = !d.enabled || d.scanning;
+    btn.textContent = d.scanning ? "Scanning…" : "Rescan now";
+    meta.textContent = d.scan ? "Scanned " + ago(d.scan.ts) : "";
+    if (!d.enabled) { box.innerHTML = '<p class="muted small">Directory scanning is disabled in the config.</p>'; return; }
+    var r = d.report;
+    if (!r) {
+      box.innerHTML = '<p class="muted small">' + (d.scanning ? "Scan in progress…" :
+        "No report yet. It is built by the next directory scan.") + "</p>";
+      return;
+    }
+    // Keep whichever sections the user opened or closed across refreshes.
+    var openState = {};
+    Array.prototype.forEach.call(box.querySelectorAll("details[data-sec]"), function (el) {
+      openState[el.getAttribute("data-sec")] = el.open;
+    });
+    function isOpen(id, dflt) { return id in openState ? openState[id] : dflt; }
+    var root = r.root_label, html = root === "~" ? "" :
+      '<p class="muted small">Paths are relative to <code>' + esc(root) + "</code>.</p>";
+
+    // Leftover downloads
+    var L = r.leftovers, lrows = [], intro, empty = "Nothing found: every entry belongs to a torrent.";
+    if (!L.enabled) {
+      intro = "Turn on <code>[transmission]</code> in the config to find downloads that no torrent uses any more.";
+      empty = "Not checked.";
+    } else if (L.error) {
+      intro = '<span class="err">Could not read Transmission: ' + esc(L.error) + "</span>";
+      empty = "Not checked.";
+    } else {
+      intro = "In Transmission's download folders (" + L.folders.map(function (f) {
+        return "<code>" + esc(showPath(root, f)) + "</code>"; }).join(", ") +
+        ") but not part of " + (L.torrents === 1 ? "its only torrent" : "any of its " + L.torrents + " torrents") + ". Usually data from torrents removed without their files.";
+      if (L.unscanned.length) intro += " Not checked, because they are outside the scanned folder: " +
+        L.unscanned.map(function (f) { return "<code>" + esc(f) + "</code>"; }).join(", ") + ".";
+      lrows = L.items.map(function (it) {
+        return item(showPath(root, it.path) + (it.is_dir ? "/" : ""), fmtBytes(it.bytes),
+          [ageText(it.mtime), freesLine(it)]);
+      });
+    }
+    html += section("leftovers", "Leftover downloads", lrows.length ? "frees " + fmtBytes(sum(L.items, "freeable")) : "",
+      intro, lrows, empty, isOpen("leftovers", true));
+
+    // Caches and logs
+    html += section("junk", "Caches, logs and trash", r.junk.length ? "frees " + fmtBytes(sum(r.junk, "freeable")) : "",
+      "Folders that apps rebuild on their own. Stop the app before emptying its folder.",
+      r.junk.map(function (j) {
+        return item(showPath(root, j.path), fmtBytes(j.bytes), [esc(j.label), freesLine(j)]);
+      }), "None of the known cache folders take up space.", isOpen("junk", true));
+
+    // Largest files
+    html += section("files", "Largest files", "",
+      "Files with more than one link are shared with another path, usually your media library: deleting one copy frees nothing.",
+      r.files.map(function (f) {
+        return item(showPath(root, f.path), fmtBytes(f.bytes),
+          [f.links > 1 ? '<span class="frees none">' + f.links + " links: frees nothing on its own</span>" : ""]);
+      }), "No files found.", isOpen("files", false));
+
+    // Likely duplicates
+    html += section("dups", "Likely duplicates", r.duplicates.length ? "up to " + fmtBytes(sum(r.duplicates, "saving")) : "",
+      "Separate files with the same size and the same content at the start, middle and end. Check before deleting one.",
+      r.duplicates.map(function (g) {
+        return item(g.paths.length + " copies of " + fmtBytes(g.bytes), "saves " + fmtBytes(g.saving),
+          g.paths.map(function (p) { return '<code>' + esc(showPath(root, p)) + "</code>"; }), "dup");
+      }), "No duplicates found.", isOpen("dups", false));
+
+    if (r.errors) html += '<p class="muted small">' + r.errors + " items could not be read and were skipped.</p>";
+    box.innerHTML = html;
+  }
+
+  function loadReclaim() {
+    return getJSON("api/reclaim").then(renderReclaim);
+  }
+
+  $("reclaim").addEventListener("click", function (ev) {
+    var b = ev.target.closest && ev.target.closest("[data-more]");
+    if (!b) return;
+    var id = b.getAttribute("data-more");
+    expanded[id] = !expanded[id];
+    loadReclaim();
+  });
+
+  var pollTimer;
+  function pollScan() {
+    clearTimeout(pollTimer);
+    pollTimer = setTimeout(function () {
+      getJSON("api/reclaim").then(function (d) {
+        renderReclaim(d);
+        if (d.scanning) pollScan(); else loadDirs();
+      });
+    }, 5000);
+  }
+
+  $("rescan").addEventListener("click", function () {
+    var btn = $("rescan");
+    btn.disabled = true; btn.textContent = "Scanning…";
+    fetch("api/rescan", { method: "POST", credentials: "same-origin", headers: { "X-Headroom": "1" } })
+      .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); pollScan(); })
+      .catch(function (e) { btn.disabled = false; btn.textContent = "Rescan now"; $("reclaim-meta").textContent = "Could not start scan: " + e.message; });
+  });
+
   /* ---------- wiring ---------- */
 
   function refresh() {
     return Promise.all([
       getJSON("api/status").then(renderStatus),
       loadHistory(),
-      loadDirs()
+      loadDirs(),
+      loadReclaim()
     ]).catch(function (e) {
       var a = $("alert");
       a.hidden = false; a.className = "alert lvl-critical";

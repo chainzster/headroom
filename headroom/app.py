@@ -132,6 +132,26 @@ def create_app(cfg: Config, store: Store, monitor: Monitor) -> Flask:
             "interval": cfg.scan_interval,
         })
 
+    @app.route("/api/reclaim")
+    def reclaim():
+        return jsonify({
+            "scan": store.scan_info(),
+            "enabled": cfg.scan_enabled,
+            "scanning": monitor.scanning,
+            "report": store.reclaim_report(),
+        })
+
+    @app.route("/api/rescan", methods=["POST"])
+    def rescan():
+        # A custom header can't be sent cross-site without a CORS preflight,
+        # so another web page can't make your browser start scans.
+        if request.headers.get("X-Headroom") != "1":
+            return jsonify({"error": "missing X-Headroom header"}), 400
+        if not cfg.scan_enabled:
+            return jsonify({"error": "directory scanning is disabled"}), 409
+        started = monitor.rescan()
+        return jsonify({"started": started, "scanning": True}), 202 if started else 200
+
     @app.route("/healthz")
     def healthz():
         return jsonify({"ok": monitor.last_error is None, "version": __version__})

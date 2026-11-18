@@ -142,3 +142,61 @@ def test_bad_thresholds(env):
     conf.write_text(conf.read_text() + "\n[thresholds]\nwarning = 95\nhigh = 90\n")
     with pytest.raises(ConfigError):
         load_config(str(conf))
+
+
+def test_reclaim_report_and_freeable_listing(env):
+    cfg, store, mon, _ = env
+    root = cfg.scan_path
+    os.makedirs(os.path.join(root, "dl", "show"))
+    os.makedirs(os.path.join(root, "media"))
+    os.makedirs(os.path.join(root, ".cache", "x"))
+    with open(os.path.join(root, "dl", "show", "e.mkv"), "wb") as fh:
+        fh.write(b"x" * 300000)
+    os.link(os.path.join(root, "dl", "show", "e.mkv"), os.path.join(root, "media", "e.mkv"))
+    with open(os.path.join(root, ".cache", "x", "blob"), "wb") as fh:
+        fh.write(b"y" * 200000)
+    mon.scan_once()
+    assert mon.scan_error is None
+    client = create_app(cfg, store, mon).test_client()
+
+    listing = client.get("/headroom/api/directories").get_json()["scan"]["listing"]
+    dl = next(d for d in listing["directories"] if d["name"] == "dl")
+    assert dl["freeable"] < 300000 <= dl["bytes"] + next(
+        d["bytes"] for d in listing["directories"] if d["name"] == "media")
+
+    rep = client.get("/headroom/api/reclaim").get_json()["report"]
+    assert rep["leftovers"]["enabled"] is False
+    assert [j["path"] for j in rep["junk"]] == [".cache"]
+    assert rep["junk"][0]["freeable"] >= 200000
+    assert rep["files"][0]["links"] == 2
+
+
+def test_rescan_needs_header(env):
+    cfg, store, mon, _ = env
+    client = create_app(cfg, store, mon).test_client()
+    assert client.post("/headroom/api/rescan").status_code == 400
+    r = client.post("/headroom/api/rescan", headers={"X-Headroom": "1"})
+    assert r.status_code in (200, 202)
+    for _ in range(100):
+        if not mon.scanning:
+            break
+        time.sleep(0.05)
+    assert store.reclaim_report() is not None
+
+
+def test_v11_dir_tree_gets_freeable_column(tmp_path):
+    import sqlite3
+    db = tmp_path / "h.db"
+    con = sqlite3.connect(str(db))
+    con.executescript(
+        "CREATE TABLE dir_scan (id INTEGER PRIMARY KEY, ts INTEGER, root TEXT, "
+        "total INTEGER, duration REAL);"
+        "INSERT INTO dir_scan VALUES (1, 1, '/h', 5, 0.1);"
+        "CREATE TABLE dir_tree (path TEXT PRIMARY KEY, parent TEXT, bytes INTEGER, "
+        "nchild INTEGER);")
+    con.commit(); con.close()
+    store = Store(db)
+    assert store.scan_info() is None  # rescan soon so the new figures appear
+    store.save_scan("/h", 10, [("a", 5, 2)], 0.1, 7, {"ok": 1})
+    assert store.dir_listing("", 5)["directories"][0]["freeable"] == 2
+    assert store.reclaim_report() == {"ok": 1}
