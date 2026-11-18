@@ -42,6 +42,17 @@ class Config:
     top_n: int = 15
     scan_depth: int = 4
     exclude: List[str] = field(default_factory=list)
+    # [reclaim]
+    largest_files: int = 25
+    duplicate_min_mb: int = 100
+    junk_defaults: bool = True
+    junk: List[str] = field(default_factory=list)
+    # [transmission]
+    tr_enabled: bool = False
+    tr_url: str = ""
+    tr_username: str = ""
+    tr_password: str = ""
+    tr_download_dirs: List[str] = field(default_factory=list)
     # [storage]
     data_dir: str = "~/.local/share/headroom"
     # [auth]
@@ -73,6 +84,10 @@ def normalise_base_url(value: str) -> str:
     return "/" + value if value else ""
 
 
+def _split(value: str) -> List[str]:
+    return [v.strip() for v in value.split(",") if v.strip()]
+
+
 def load_config(path: Optional[str] = None) -> Config:
     path = _expand(path or os.environ.get("HEADROOM_CONFIG") or DEFAULT_CONFIG_PATH)
     if not os.path.isfile(path):
@@ -90,7 +105,8 @@ def load_config(path: Optional[str] = None) -> Config:
     def get(section, key, fallback, conv=str):
         if not parser.has_option(section, key):
             return fallback
-        raw = parser.get(section, key).strip()
+        # raw: a "%" in a password must not be read as interpolation.
+        raw = parser.get(section, key, raw=True).strip()
         if raw == "":
             return fallback
         try:
@@ -118,9 +134,17 @@ def load_config(path: Optional[str] = None) -> Config:
         scan_timeout=get("directories", "timeout", d.scan_timeout, int),
         top_n=get("directories", "top_n", d.top_n, int),
         scan_depth=get("directories", "depth", d.scan_depth, int),
-        exclude=[
-            e.strip() for e in get("directories", "exclude", "").split(",") if e.strip()
-        ],
+        exclude=_split(get("directories", "exclude", "")),
+        largest_files=get("reclaim", "largest_files", d.largest_files, int),
+        duplicate_min_mb=get("reclaim", "duplicate_min_size_mb", d.duplicate_min_mb, int),
+        junk_defaults=get("reclaim", "junk_defaults", d.junk_defaults, bool),
+        junk=_split(get("reclaim", "junk", "")),
+        tr_enabled=get("transmission", "enabled", d.tr_enabled, bool),
+        tr_url=get("transmission", "url", d.tr_url),
+        tr_username=get("transmission", "username", d.tr_username),
+        tr_password=get("transmission", "password", d.tr_password),
+        tr_download_dirs=[_expand(p) for p in
+                          _split(get("transmission", "download_dirs", ""))],
         data_dir=_expand(get("storage", "data_dir", d.data_dir)),
         username=get("auth", "username", d.username),
         password_hash=get("auth", "password_hash", d.password_hash),
@@ -149,5 +173,11 @@ def validate(cfg: Config) -> None:
         raise ConfigError("[directories] top_n must be between 1 and 100")
     if not 1 <= cfg.scan_depth <= 8:
         raise ConfigError("[directories] depth must be between 1 and 8")
+    if not 0 <= cfg.largest_files <= 200:
+        raise ConfigError("[reclaim] largest_files must be between 0 and 200")
+    if cfg.duplicate_min_mb < 0:
+        raise ConfigError("[reclaim] duplicate_min_size_mb must be 0 (off) or more")
+    if cfg.tr_url and not cfg.tr_url.startswith(("http://", "https://")):
+        raise ConfigError("[transmission] url must start with http:// or https://")
     if bool(cfg.username) != bool(cfg.password_hash):
         raise ConfigError("[auth] set both username and password_hash, or neither")

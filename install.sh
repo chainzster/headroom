@@ -40,6 +40,7 @@ say "Creating virtualenv in $APP_DIR/.venv"
 "$APP_DIR/.venv/bin/python" -m pip install --quiet -r "$APP_DIR/requirements.txt"
 
 mkdir -p "$CONF_DIR" "$DATA_DIR" "$UNIT_DIR"
+chmod 700 "$CONF_DIR"
 
 if [ -f "$CONF" ]; then
   say "Keeping existing config: $CONF"
@@ -52,6 +53,8 @@ else
       "$APP_DIR/config.example.ini" > "$CONF"
   say "Created config: $CONF (port $PORT, base_url $BASE_URL)"
 fi
+# The config can hold a Transmission password: readable by you only.
+chmod 600 "$CONF"
 
 # The unit assumes the app lives in ~/headroom; adjust if cloned elsewhere.
 sed "s|%h/headroom|$APP_DIR|g" "$APP_DIR/deploy/headroom.service" > "$UNIT_DIR/headroom.service"

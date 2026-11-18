@@ -111,6 +111,25 @@ password_hash = scrypt:32768:8:1$...
 
 Then restart Headroom: `systemctl --user restart headroom`.
 
+## 6b. (Optional) Find leftover downloads in Transmission
+
+Headroom can compare Transmission's download folders with its torrent list and
+show what no torrent uses any more. It only reads the list. It never removes
+anything. Add this to `~/.config/headroom/config.ini`:
+
+```ini
+[transmission]
+enabled = true
+username = your-transmission-username
+password = your-transmission-password
+```
+
+Leave `url` empty and Headroom reads the port from
+`~/.config/transmission-daemon/settings.json`. If that fails, find the port
+there (`rpc-port`) and set
+`url = http://127.0.0.1:<rpc-port>/transmission/rpc`. Then restart Headroom
+and press **Rescan now** on the dashboard.
+
 ## 7. Publish over HTTPS with Ultra.cc's Nginx
 
 ```bash

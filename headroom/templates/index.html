@@ -66,6 +66,23 @@
       </div>
       <nav id="dirs-crumbs" class="crumbs" aria-label="Folder path" hidden></nav>
       <ol id="dirs" class="dirs"></ol>
+      <p class="muted small note"><b>frees</b> is what deleting a folder would give back.
+        It's lower than the size when files in it are hard links to files elsewhere (as
+        Sonarr and Radarr make): those only free space once every copy is gone.</p>
+    </section>
+
+    <section class="card" aria-labelledby="reclaim-title">
+      <div class="card-head">
+        <h2 id="reclaim-title">Space you could free</h2>
+        <div class="head-actions">
+          <span id="reclaim-meta" class="muted small"></span>
+          <button type="button" id="rescan" class="btn">Rescan now</button>
+        </div>
+      </div>
+      <p class="muted small intro">Headroom only reports. It never deletes anything.
+        Where deleting an item would give back less than its size, because of hard
+        links, that is shown as <b>frees</b>.</p>
+      <div id="reclaim"></div>
     </section>
 
     <footer class="foot muted small">

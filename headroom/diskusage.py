@@ -1,78 +1,71 @@
-"""Measure directory sizes in the home directory using `du`.
+"""Run the directory scan in a separate, low-priority process.
 
-A single `du` pass records every directory down to `depth` levels below the
-scan root, so the dashboard can drill down without running further scans.
-
-The scan runs at the lowest CPU and I/O priority available and never crosses
-filesystem boundaries (`-x`), so rclone/FUSE mounts inside the home directory
-are skipped rather than walked.
+The walk itself lives in scanner.py. It runs as a child process under
+`nice -n 19 ionice -c 3`, so on a shared server it only uses CPU and disk time
+nobody else wants, and it can be killed cleanly if it times out.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
-from typing import List, Tuple
+import sys
+from typing import Dict, List, Sequence, Tuple
 
-# (path relative to the scan root, bytes). The root itself is "".
-Entry = Tuple[str, int]
+from . import scanner
+
+# Folders that are safe to empty: apps rebuild them as needed. Patterns are
+# relative to the scan root; `*` also matches `/`. The first match wins and
+# nothing below a match is matched again.
+DEFAULT_JUNK: List[Tuple[str, str]] = [
+    (".cache", "Cache"),
+    (".local/share/Trash", "Trash"),
+    ("*/.Trash-*", "Trash"),
+    ("*/Plex Media Server/Cache", "Plex cache"),
+    ("*/Plex Media Server/Crash Reports", "Plex crash reports"),
+    ("*/Plex Media Server/Logs", "Plex logs"),
+    ("*/Plex Media Server/Diagnostics", "Plex diagnostics"),
+    (".config/*/logs", "App logs"),
+    (".config/*/Logs", "App logs"),
+    (".config/*/Backups", "App backups"),
+    (".config/*/backups", "App backups"),
+]
 
 
 class ScanError(RuntimeError):
     pass
 
 
-def build_command(path: str, excludes: List[str], depth: int = 1) -> List[str]:
+def build_command() -> List[str]:
     cmd: List[str] = []
     if shutil.which("nice"):
         cmd += ["nice", "-n", "19"]
     if shutil.which("ionice"):
         cmd += ["ionice", "-c", "3"]
-    # -0: NUL-terminated records, so names containing newlines can't break parsing.
-    cmd += ["du", "-0", "-x", "-B1", "--max-depth=%d" % depth]
-    for pattern in excludes:
-        cmd.append("--exclude=" + pattern)
-    cmd.append(path)
-    return cmd
+    # -I: isolated mode, so nothing in the scanned tree can shadow a module.
+    return cmd + [sys.executable, "-I", os.path.abspath(scanner.__file__)]
 
 
-def parse_du_output(text: str, root: str) -> Tuple[int, List[Entry]]:
-    """Return (total bytes of root, [(relative path, bytes), ...]).
-
-    The list holds every directory du reported below the root, at any depth,
-    in no particular order. Accepts NUL- or newline-terminated records.
-    """
-    root = root.rstrip("/") or "/"
-    prefix = root if root == "/" else root + "/"
-    total = None
-    entries: List[Entry] = []
-    for record in text.split("\0" if "\0" in text else "\n"):
-        size, sep, path = record.lstrip("\n").partition("\t")
-        if not sep or not size.isdigit():
-            continue
-        path = path.rstrip("/") or "/"
-        if path == root:
-            total = int(size)
-        elif path.startswith(prefix):
-            entries.append((path[len(prefix):], int(size)))
-    if total is None:
-        raise ScanError("du produced no total for %s" % root)
-    return total, entries
-
-
-def scan(path: str, excludes: List[str], timeout: int,
-         depth: int = 1) -> Tuple[int, List[Entry]]:
+def scan(path: str, excludes: Sequence[str], timeout: int, depth: int = 4,
+         watch: Sequence[str] = (), junk: Sequence[Tuple[str, str]] = (),
+         top_files: int = 25, dup_min: int = 0) -> Dict:
     if not os.path.isdir(path):
         raise ScanError("Not a directory: %s" % path)
+    params = {"root": path, "depth": depth, "excludes": list(excludes),
+              "watch": list(watch), "junk": [list(j) for j in junk],
+              "top_files": top_files, "dup_min": dup_min}
     try:
-        proc = subprocess.run(
-            build_command(path, excludes, depth), capture_output=True, text=True,
-            errors="replace", timeout=timeout, env=dict(os.environ, LC_ALL="C"),
-        )
-    except FileNotFoundError as exc:
-        raise ScanError("du not found") from exc
+        proc = subprocess.run(build_command(), input=json.dumps(params),
+                              capture_output=True, text=True, timeout=timeout,
+                              cwd="/", env=dict(os.environ, LC_ALL="C"))
     except subprocess.TimeoutExpired as exc:
         raise ScanError("Directory scan timed out after %ss" % timeout) from exc
-    # du exits 1 on unreadable entries but still prints usable totals.
-    return parse_du_output(proc.stdout, path)
+    if proc.returncode != 0:
+        tail = (proc.stderr or "").strip().splitlines()[-1:] or ["no output"]
+        raise ScanError("Directory scan failed: %s" % tail[0])
+    try:
+        return json.loads(proc.stdout)
+    except ValueError as exc:
+        raise ScanError("Directory scan produced unreadable output") from exc

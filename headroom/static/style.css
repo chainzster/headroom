@@ -146,6 +146,44 @@ h2 { font-size: 15px; margin: 0; font-weight: 600; }
 .crumbs .here { font-weight: 600; overflow-wrap: anywhere; }
 .dirs .empty { color: var(--muted); font-size: 14px; display: block; border: 0; }
 
+.dirs .frees { display: block; font-size: 12px; color: var(--muted); }
+.frees.none { color: var(--high); }
+.note { margin: 10px 0 0; }
+.note b { font-weight: 600; color: var(--text-2); }
+
+.head-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.btn { font: inherit; font-size: 13px; padding: 4px 12px; border-radius: 8px; border: 1px solid var(--border);
+       background: var(--surface); color: var(--text); cursor: pointer; }
+.btn:hover:not(:disabled) { background: var(--track); }
+.btn:disabled { color: var(--muted); cursor: default; }
+.btn:focus-visible, .more:focus-visible { outline: 2px solid var(--series); outline-offset: 2px; }
+.intro { margin: -4px 0 10px; }
+.intro b { font-weight: 600; color: var(--text-2); }
+code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; overflow-wrap: anywhere; }
+.err { color: var(--critical); }
+
+.rsec { border-top: 1px solid var(--grid); }
+.rsec summary { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; cursor: pointer;
+                font-weight: 600; font-size: 14px; list-style: none; }
+.rsec summary::-webkit-details-marker { display: none; }
+.rsec summary span:first-child::before { content: "›"; display: inline-block; width: 10px; margin-right: 4px;
+                                          text-align: center; color: var(--muted); transition: transform .15s; }
+.rsec[open] summary span:first-child::before { transform: rotate(90deg); }
+.rsec summary:focus-visible { outline: 2px solid var(--series); outline-offset: 2px; border-radius: 4px; }
+.rtotal { font-variant-numeric: tabular-nums; color: var(--text-2); font-weight: 600; }
+.rsec > p { margin: 0 0 8px; }
+.rlist { list-style: none; margin: 0 0 10px; padding: 0; }
+.rlist li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; padding: 6px 0; border-top: 1px solid var(--grid); }
+.rlist li:first-child { border-top: 0; }
+.rlist .name { overflow-wrap: anywhere; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+.rlist .size { font-variant-numeric: tabular-nums; font-size: 13px; text-align: right; }
+.rlist .sub { grid-column: 1 / -1; font-size: 12px; color: var(--muted); }
+.rlist .dup .name { font-family: inherit; }
+.rlist .dup .sub { display: flex; flex-direction: column; gap: 2px; }
+.rlist .dup .dot-sep { display: none; }
+.more { all: unset; cursor: pointer; color: var(--series); font-size: 13px; margin: 0 0 12px; }
+.more:hover { text-decoration: underline; }
+
 .foot { text-align: center; margin-top: 8px; }
 
 @media (max-width: 560px) {
