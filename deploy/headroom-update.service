@@ -1,0 +1,13 @@
+# Runs update.sh for the headroom-update.timer. Installed by
+# `bash update.sh --enable-auto`; %h expands to your home directory.
+
+[Unit]
+Description=Update Headroom from GitHub
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/headroom
+ExecStart=/bin/bash %h/headroom/update.sh --auto
+Nice=10
+StandardOutput=append:%h/.local/share/headroom/update.log
+StandardError=append:%h/.local/share/headroom/update.log
