@@ -90,6 +90,11 @@ service after changing it: `systemctl --user restart headroom`.
 systemctl --user status headroom
 systemctl --user restart headroom
 
+# Update to the latest code (rolls back if the new version fails to start)
+bash ~/headroom/update.sh
+# Or let it update itself hourly
+bash ~/headroom/update.sh --enable-auto
+
 # Check the config and read the quota once, without starting the server
 ~/headroom/.venv/bin/python -m headroom --check
 
@@ -188,7 +193,8 @@ headroom/            application package
   templates/, static/  the dashboard
 config.example.ini   annotated configuration
 install.sh           Ultra.cc installer (venv, config, systemd unit)
-deploy/              systemd unit and Nginx proxy example
+update.sh            updater with rollback; --enable-auto for hourly updates
+deploy/              systemd units (app, update timer) and Nginx proxy example
 docs/                Ultra.cc install guide and reference
 tests/               pytest suite
 ```

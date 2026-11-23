@@ -168,6 +168,7 @@ Logs:
 ```bash
 tail -f ~/.local/share/headroom/headroom.log   # application log (rotated)
 tail -f ~/.local/share/headroom/service.log    # startup errors / crashes
+tail -f ~/.local/share/headroom/update.log     # automatic updates
 ```
 
 ## Updating
@@ -181,15 +182,40 @@ You never need to repeat the whole install.
 systemctl --user restart headroom
 ```
 
-**New code:** pull and restart:
+**New code:** run the updater:
 
 ```bash
-cd ~/headroom && git pull && systemctl --user restart headroom
+bash ~/headroom/update.sh
 ```
 
-If `requirements.txt` changed, run `bash install.sh` instead of the restart.
-It updates the virtualenv and restarts the service, and never overwrites your
-config.
+It pulls the latest code, reinstalls packages if `requirements.txt` changed,
+checks the new version, restarts the service and waits for it to answer. If
+any of that fails, it puts the previous version back and restarts it, so a bad
+update doesn't leave the dashboard down.
+
+To update from your own computer without opening a shell on the server:
+
+```bash
+ssh <username>@<hostname>.usbx.me 'bash ~/headroom/update.sh'
+```
+
+### Automatic updates (optional)
+
+```bash
+bash ~/headroom/update.sh --enable-auto
+```
+
+This installs a systemd user timer that checks GitHub about once an hour and
+runs the same update when there is new code. Results are appended to
+`~/.local/share/headroom/update.log`. A version that fails its checks is
+rolled back and skipped until a newer one is published. Every change pushed to
+`main` reaches your server within the hour, so leave this off if you'd rather
+choose when to update.
+
+```bash
+systemctl --user list-timers headroom-update.timer   # next check
+bash ~/headroom/update.sh --disable-auto             # turn it off
+```
 
 Your config and history are stored outside the code directory, so updates keep
 them.
@@ -206,6 +232,7 @@ git fetch && git reset --hard origin/main
 ## Uninstalling
 
 ```bash
+bash ~/headroom/update.sh --disable-auto
 systemctl --user disable --now headroom
 rm ~/.config/systemd/user/headroom.service
 systemctl --user daemon-reload
